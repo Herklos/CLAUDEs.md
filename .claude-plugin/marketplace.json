@@ -1,0 +1,27 @@
+{
+  "name": "herklos",
+  "owner": {
+    "name": "Herklos",
+    "url": "https://github.com/Herklos"
+  },
+  "metadata": {
+    "description": "Herklos' Claude Code plugins.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "herklaude-skills",
+      "source": "./",
+      "description": "A cross-project knowledge base of non-obvious gotchas for Expo, React Native, i18n, in-app purchases, ASO, Maestro, offline sync, and web3 signing. Every entry cost a real debugging session and is absent from the official docs.",
+      "version": "0.1.0",
+      "category": "knowledge",
+      "keywords": [
+        "expo",
+        "react-native",
+        "knowledge-base",
+        "debugging",
+        "mobile"
+      ]
+    }
+  ]
+}

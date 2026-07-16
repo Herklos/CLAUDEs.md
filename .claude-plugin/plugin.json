@@ -1,0 +1,17 @@
+{
+  "name": "herklaude-skills",
+  "description": "A cross-project knowledge base of non-obvious gotchas for Expo, React Native, i18n, in-app purchases, ASO, Maestro, offline sync, and web3 signing. Every entry cost a real debugging session and is absent from the official docs.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Herklos"
+  },
+  "homepage": "https://github.com/Herklos/CLAUDEs.MD",
+  "repository": "https://github.com/Herklos/CLAUDEs.MD",
+  "keywords": [
+    "expo",
+    "react-native",
+    "knowledge-base",
+    "debugging",
+    "mobile"
+  ]
+}

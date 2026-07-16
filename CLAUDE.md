@@ -19,6 +19,26 @@ category lives in the filename prefix, not in a folder tree.
 There is no index file, and there should not be one — it would be a second
 place to forget to update. Each file carries its own `## Contents`.
 
+The exception to the flat layout is the packaging that makes this base
+reachable from a session on any codebase, as a Claude Code plugin:
+
+- `skills/herklaude-skills/SKILL.md` — the skill itself.
+- `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` — the repo
+  is its own single-plugin marketplace (`/plugin marketplace add
+  Herklos/CLAUDEs.MD`).
+- `install.sh` / `uninstall.sh` — the alternative route, symlinking
+  `skills/herklaude-skills` into `~/.claude/skills/` so local edits apply
+  with no `/plugin update`.
+
+`SKILL.md` lists no topics on purpose — it globs `*.CLAUDE.md`, which keeps
+it from becoming the index this repo refuses to have. It finds the notes two
+directories above its own, which holds under both routes; keep that depth if
+you ever move things. Adding a topic file therefore needs no change there.
+Only the `description` needs a keyword added when a new topic introduces a
+genuinely new subsystem, since that description is what makes the skill fire.
+Bump `version` in *both* `.claude-plugin` files together when the skill
+changes, or marketplace users will not be offered the update.
+
 ## File format
 
 - **H1**: `# <Topic> — tips, gotchas & reference notes`
