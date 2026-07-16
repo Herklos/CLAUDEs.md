@@ -153,6 +153,12 @@ second time:
       "message": "The price already exists for this product."}
 ```
 
+The 409 is keyed on the **product**, not on `(product, currency)`. That is the decisive
+test and it is worth running before theorising: retrying with a SINGLE currency returns the
+same 409, so there is no per-currency upsert and no partial-write path. An empty
+`{"prices": []}` body is not a clearing operation either — it 400s on validation before the
+conflict check is even reached.
+
 The surface is create-only. There is no update-price and no delete-price:
 
 - `create-product-prices` — the only price WRITE for a test_store product, and it
@@ -160,6 +166,11 @@ The surface is create-only. There is no update-price and no delete-price:
 - `set-product-store-state` — takes `store: app_store | play_store` only, so it
   does not apply to a test-store product at all.
 - `equalize-subscription-prices` — App Store subscriptions only.
+
+The store-state subsystem does not silently no-op on a test-store product, which is what
+proving this negative actually rests on: it refuses EXPLICITLY, on both the read and the
+write side, with `store_state operations currently support only app_store and play_store`.
+The enum admits no `test_store` value, so nothing is hiding behind the schema.
 
 Check the app's `type` before concluding anything; the same product id behaves
 differently per app type, and `create-product-prices` errors on a NON-test_store
