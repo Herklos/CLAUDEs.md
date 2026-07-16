@@ -11,17 +11,57 @@ ordering assumption nobody wrote down.
 
 ## Contents
 
-1. [Hydration ordering](#hydration-ordering)
-2. [Local writes vs remote writes](#local-writes-vs-remote-writes)
-3. [Merging](#merging)
+1. [When sync does nothing at all](#when-sync-does-nothing-at-all)
+   - [A circular early-return deadlock hides every bug behind it](#a-circular-early-return-deadlock-hides-every-bug-behind-it)
+2. [Hydration ordering](#hydration-ordering)
+3. [Local writes vs remote writes](#local-writes-vs-remote-writes)
+4. [Merging](#merging)
    - [The merge rules](#the-merge-rules)
    - [Absence is not a deletion](#absence-is-not-a-deletion)
    - [Writes that arrive during the pull](#writes-that-arrive-during-the-pull)
-4. [Tombstones](#tombstones)
-5. [The push hash](#the-push-hash)
-6. [Wiping](#wiping)
+5. [Tombstones](#tombstones)
+6. [The push hash](#the-push-hash)
+7. [Wiping](#wiping)
 
 ---
+
+## When sync does nothing at all
+
+### A circular early-return deadlock hides every bug behind it
+
+Sharing had never worked once, in any build. Not "worked and broke" — never
+ran. The cause was two guards pointing at each other:
+
+```ts
+invite()       // if (!session || !spaceId) return;   ← spaceId only set by activateSync
+activateSync() // if (!bulle.spaceId) return;         ← never reached, so never sets it
+```
+
+Nothing threw. Nothing logged. The button worked, the spinner stopped, and no
+request was ever sent. The tell is what it *masked*: the configured sync host
+did not resolve (NXDOMAIN) and nobody had noticed **in months**, because sync
+never got far enough to fail. A dead network is invisible behind code that
+never reaches the network.
+
+**Fix**: whoever needs the precondition establishes it, rather than waiting for
+someone else to. Provisioning became explicit and idempotent, and the caller
+derives its own session instead of reading a singleton that may be unset.
+
+`Generalizes:` a silent `return` is the worst failure mode a feature can have,
+because it produces *no* evidence — a throw gets a stack, a rejection gets a
+log, a `return` gets nothing, and the UI cheerfully reports success. So:
+
+- **When something "does nothing", look for a guard before you look at the
+  network.** "Does nothing" and "fails" have completely disjoint suspect lists,
+  and it is always cheaper to check for the first.
+- Two early-returns each waiting on state the *other* sets is a deadlock that
+  no test catches, because each function is individually correct.
+- A guard that silently returns on missing state is claiming that state is
+  someone else's job. If nobody's code path establishes it, the feature is
+  dead from the first commit and looks merely unused.
+- Corollary: a downstream component can be broken for months with zero signal
+  while an upstream no-op shields it. Fixing the no-op reveals a queue of bugs
+  that were always there — expect them, and don't read them as regressions.
 
 ## Hydration ordering
 

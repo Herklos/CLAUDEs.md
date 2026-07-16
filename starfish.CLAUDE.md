@@ -16,7 +16,9 @@ the things that are true because of *these* packages.
    - [Build the layout lazily, or a partial mock in an unrelated test crashes](#build-the-layout-lazily-or-a-partial-mock-in-an-unrelated-test-crashes)
 3. [Namespace migration](#namespace-migration)
    - [Re-provisioning beats writing a data migration](#re-provisioning-beats-writing-a-data-migration)
-4. [Platform shims](#platform-shims)
+4. [Running a local server](#running-a-local-server)
+   - [`cors: true` passes the preflight and still blocks every authenticated request](#cors-true-passes-the-preflight-and-still-blocks-every-authenticated-request)
+5. [Platform shims](#platform-shims)
    - [A generic pure-JS Argon2id shim is a 100× regression on Hermes](#a-generic-pure-js-argon2id-shim-is-a-100-regression-on-hermes)
 
 ---
@@ -123,6 +125,45 @@ usually a re-provision. Look for the existing first-run path before writing a
 migration path that only ever runs once.
 
 ---
+
+## Running a local server
+
+### `cors: true` passes the preflight and still blocks every authenticated request
+
+Standing up a local harness, the browser reported no error worth reading: the
+`OPTIONS` preflight returned **204**, and the `POST` simply never appeared in
+the server log. Not a 4xx, not a CORS console error loud enough to notice —
+the request never left. From the app it is indistinguishable from a server
+that accepts the connection and never answers, which sends you debugging the
+server, the URL, and the client's retry logic in that order. All fine.
+
+The default `cors: true` allows a conservative header set. A cap-authenticated
+client sends `Authorization`, `X-Cap`, `X-Nonce`, `X-Sig`, `If-Match` — none
+of them defaults. The preflight succeeds because the *method* is allowed; the
+browser then compares the requested **headers** against `allow-headers`,
+finds them absent, and silently drops the real request.
+
+**Fix**: enumerate them.
+
+```js
+cors: {
+  origin: '*',
+  allowMethods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+  allowHeaders: ['*', 'Authorization', 'Content-Type', 'If-Match',
+                 'X-Cap', 'X-Nonce', 'X-Sig'],
+  exposeHeaders: ['*', 'ETag', 'If-Match'],
+}
+```
+
+Add request logging to the harness first. "Did the request arrive at all?" is
+the question that splits the search space in half, and a CORS drop is the one
+failure where the answer is no while everything client-side looks healthy.
+
+`Generalizes:` a 204 preflight means the *method* was approved, never that the
+request will be sent — headers are checked separately and failing that check
+is silent by design. Any auth scheme carrying custom headers has to declare
+them explicitly, and `cors: true` is a convenience default that quietly
+excludes exactly the headers auth needs.
 
 ## Platform shims
 

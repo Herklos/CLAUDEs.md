@@ -12,9 +12,11 @@ TurboModule registration, EAS, Metro) see `expo.CLAUDE.md`.
    - [Spacing recycled cells](#spacing-recycled-cells)
    - [Sectioned data](#sectioned-data)
    - [A row reading state outside its own item silently renders stale](#a-row-reading-state-outside-its-own-item-silently-renders-stale)
-2. [Scrolling](#scrolling)
-3. [Dependencies that patch globals](#dependencies-that-patch-globals)
-4. [JS/TS syntax traps](#jsts-syntax-traps)
+2. [Store selectors](#store-selectors)
+   - [A selector that builds a new array/object each call re-renders forever](#a-selector-that-builds-a-new-arrayobject-each-call-re-renders-forever)
+3. [Scrolling](#scrolling)
+4. [Dependencies that patch globals](#dependencies-that-patch-globals)
+5. [JS/TS syntax traps](#jsts-syntax-traps)
 
 ---
 
@@ -92,6 +94,40 @@ ambient state, the memo key has to include it — and the symptom will be
 staleness with a delay, not staleness with a stack trace.
 
 ---
+
+## Store selectors
+
+### A selector that builds a new array/object each call re-renders forever
+
+```
+RangeError: Maximum call stack size exceeded
+```
+
+from a component doing nothing unusual:
+
+```ts
+const openTasks = useStore((s) => s.tasks.filter((t) => !t.done)); // ← the bug
+```
+
+The store never changed, but `filter` returns a **new array reference** every
+call. The check deciding "did my slice change?" is referential, so it is always
+false, so the component re-renders, so the selector runs again. The stack
+overflow is that loop hitting its ceiling — not recursion in your code, which
+is why reading the component teaches you nothing.
+
+**Fix**: select the stable reference, derive outside the selector.
+
+```ts
+const tasks = useStore((s) => s.tasks);                    // stable ref
+const openTasks = useMemo(() => tasks.filter((t) => !t.done), [tasks]);
+```
+
+`Generalizes:` a selector must be a *projection*, never a computation. If its
+body contains `filter`/`map`/`slice`/`Object.values`/`{...}`/`[...]` it
+allocates, and allocation defeats referential equality by construction. Not a
+zustand quirk: it holds for any subscribe-with-selector store (redux
+`useSelector`, valtio, jotai) and for `useSyncExternalStore` directly. Derive
+with `useMemo`, or pass an equality function.
 
 ## Scrolling
 

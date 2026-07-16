@@ -116,6 +116,30 @@ crowds out the datum.
 
 ---
 
+## Verifying themes
+
+### Forcing `prefers-color-scheme` over CDP manufactures a contrast bug that isn't there
+
+Driving a running app and flipping the emulated colour scheme after load shows
+invisible text, washed-out headings, "unreadable" body copy — a screenful of
+convincing accessibility failures that **do not exist** in a real browser.
+
+The emulation repaints what CSS owns (the background) while the JS theme
+context keeps the value it read at mount, so foreground colours stay on the
+old theme. You are looking at dark text on a dark background that no user can
+ever produce, because a real user's preference is known *before* React mounts.
+
+**Fix**: set the colour scheme when launching, or reload after forcing it.
+Then reproduce anything you find in a clean browser **before** believing it.
+
+`Generalizes:` an emulated environment change applied *after* load only reaches
+the layers that re-read it continuously. Anything cached at startup — a theme
+context, a media-query value read once, a locale, a feature flag — silently
+keeps the old value, and the resulting half-updated state is an artefact of
+your tooling. Cost a full cycle chasing a contrast bug that was never in the
+app. Suspect the harness before the app when a failure is *too* dramatic to
+have gone unnoticed.
+
 ## Adapt with props, not parallel screens
 
 Two-state variants of the same screen — "has node" vs "no node", "empty" vs

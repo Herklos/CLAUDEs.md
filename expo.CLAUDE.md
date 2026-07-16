@@ -78,6 +78,42 @@ Fix: either navigate through an intermediate screen so a real Stack entry
 exists first, or use modal presentation with an explicit close button
 instead of relying on the back chevron.
 
+### `<Stack.Screen options>` nested inside a scroll container never reaches the navigator
+
+The header silently stays bare. No warning, no error: the element renders, its
+props are simply never read, so this reads as "options don't work" rather than
+"options are in the wrong place".
+
+`<Stack.Screen>` is not a rendered component; it is a **declaration** the
+navigator collects from the screen's element tree. Put it inside a
+`ScrollView`'s content container (or any wrapper that renders `children` into
+one) and it is no longer somewhere the navigator looks.
+
+**Fix**: make it a *sibling* of the scroll container, not a child.
+
+```tsx
+// Silently does nothing — Screen renders children inside a ScrollView.
+<Screen>
+  <Stack.Screen options={{ headerRight: ... }} />
+  ...
+</Screen>
+
+// Works.
+<>
+  <Stack.Screen options={{ headerRight: ... }} />
+  <Screen>...</Screen>
+</>
+```
+
+This bites hardest with a house `<Screen>` wrapper, because the fact that
+there is a `ScrollView` in the middle is exactly what the wrapper hides.
+
+`Generalizes:` a declarative-config element (`Stack.Screen`, `Head`, anything
+collected into a parent registry) is picked up by its *position in the tree*,
+not by being rendered. Any wrapper between it and its collector can break it
+while still rendering it — so "it's right there in the JSX" is not evidence
+it is wired.
+
 ### `Screen`/safe-area padding double-counts with native headers
 
 A shared `Screen` wrapper that adds `paddingTop: insets.top` needs to
@@ -572,6 +608,28 @@ expanding it inline under the row it edits is fewer moving parts than a
 modal, and sidesteps every sheet gotcha above. Keep the sheet path for the
 platforms that need it.
 
+#### `mode="datetime"` silently degrades to a date-only picker on Android
+
+No warning, no error: the time half simply is not there. The prop is accepted
+and the component renders, so it reads as a layout or styling bug rather than
+an unsupported mode.
+
+**Fix**: don't use `mode="datetime"`. Split it into an explicit stepped flow
+(`mode="date"`, then `mode="time"`) — also better UX than a compound control
+on a phone.
+
+#### An inline picker ignores height and swallows vertical drags
+
+It sizes itself (`matchContents`) and eats the vertical pan, so any scroll
+container stops scrolling in the region it occupies.
+
+**Fix**: a screen containing an inline picker must not depend on scrolling to
+reach anything. Put the primary action in the **header**, not below the fold.
+
+`Generalizes:` a native control hosted inside RN is a gesture *sink*, not a
+gesture participant. Assume it wins every pan inside its bounds, and design
+the screen so nothing important sits behind a scroll that crosses it.
+
 ### `swift-ui/modifiers` vs `jetpack-compose/modifiers`
 
 **`@expo/ui/swift-ui/modifiers` crashes the web bundle at load if imported
@@ -747,6 +805,35 @@ npx expo prebuild --clean -p android
 (regenerate the native project from scratch, since prebuild output is
 otherwise stale relative to the plugin).
 
+### `expo run:android` does not re-run prebuild when `android/` is checked in
+
+Add a native dependency, run `expo run:android`, and the JS side resolves the
+package fine while the native module is **null at runtime**:
+
+```
+TypeError: Cannot read property 'setLogLevel' of null
+```
+
+which reads as "the SDK is broken" or "the API changed", not "autolinking
+never saw it". With a committed `android/` directory, `run:android` treats the
+native project as the source of truth and goes straight to Gradle: the new
+module is never linked, and nothing says so.
+
+**Fix**: run `npx expo prebuild` explicitly after adding any native dep, then
+**verify the autolinking count actually moved** in the build log:
+
+```
+Autolinking: 17 modules   ← was 16. Unchanged means prebuild did not run.
+```
+
+That count is the cheapest true signal available. A successful build proves
+nothing here, because the build succeeds either way.
+
+`Generalizes:` a null native module is almost never a broken SDK — it is a
+module that was never registered, so check linkage before debugging the API.
+More broadly: in any tool with a generate step and a build step, committing
+the generated output silently converts the generate step into a manual one.
+
 **Static verification** — grep the regenerated native project for every
 piece the plugin was supposed to inject, e.g.:
 ```bash
@@ -817,6 +904,39 @@ instead.
 package's subpaths in practice — a pattern that holds for the entries you
 inherited is not evidence it holds for the entry you add. And the platform
 that breaks is the one whose conditions you weren't thinking about.
+
+### A platform-extension file importing its own basename resolves to *itself*
+
+`Foo.web.tsx` containing `import { x } from './Foo'` does **not** import
+`Foo.tsx`. Platform resolution rewrites `./Foo` to the best match for the
+current platform, which on web is `Foo.web.tsx` — the importing file. The
+module requires itself.
+
+The symptom points nowhere near the cause:
+
+```
+RangeError: Maximum call stack size exceeded
+    at Object.get [as someHarmlessExport]
+```
+
+The trace names an innocent getter, because that is merely where the cycle
+was observed. Nothing mentions platform resolution, and the import looks
+obviously correct.
+
+**Fix**: shared types/values for a platform-split component live in a **third,
+platform-neutral file**, never in one of the variants.
+
+```
+DueDate.tsx        // native variant
+DueDate.web.tsx    // web variant
+due-date.ts        // shared props/types/defaults — imported by BOTH
+```
+
+`Generalizes:` inside a platform-split family, a bare relative import of the
+family's own basename is never unambiguous: it means "whichever variant is
+resolving right now", which *from* a variant means "me". The `.web`/`.native`
+suffix is a resolution **input**, not a filename, so a sibling variant cannot
+be addressed by name at all. Anything shared must live outside the family.
 
 ### Forcing a specific resolution for a package with problematic dynamic imports
 
