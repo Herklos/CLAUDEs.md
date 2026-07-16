@@ -437,6 +437,49 @@ only accepts a fully-native subtree, and the prop isn't worth the rewrite.
 The cost of the container is never the container — it's everything it forces
 its children to become.
 
+### A native container also imposes its VISUAL idiom, not just its children rule
+
+`FieldGroup` is the right control on paper: SwiftUI `Form` on iOS, Material 3
+grouped list on Android, and `FieldGroup.Section` gives real native section
+headers. Reaching for it to group a flat settings screen is a defensible call and
+the reasoning is seductive — a settings screen IS a form, and both platforms ship
+`Form` for exactly this.
+
+On Android it renders the M3 **connected list**: a filled rounded container per
+section, with *another* rounded card per row inside it. Boxes inside boxes.
+
+That is not a bug. It is Material Design working correctly. But if the design
+system it lands in forbids cards, borders, or alternating section backgrounds —
+and says hierarchy comes from space and type — then adopting the container quietly
+adopts a visual language that contradicts the brief. The screen becomes more
+native and less *itself*, and it does so on the one screen where "looks like the
+OS" is the most tempting argument.
+
+**Fix**: group with your own primitives (a section header, a row, a 1px rule).
+Keep the native control only for LEAF widgets — a Switch, a picker, a date
+control — inside your own row. A leaf imposes nothing on its neighbours; a
+container imposes on everything it holds.
+
+Dropping the container also drops its constraints, which are easy to forget were
+the container's and not the screen's:
+
+- the screen scrolls again (a Compose lazy container needs a BOUNDED height, so
+  the screen had `scroll={false}` and the Host could not `matchContents` — get it
+  wrong and it is a hard native crash, not a layout glitch);
+- anything below the container no longer fights it for height, so a footer line
+  is last because it belongs last rather than to survive the fight.
+
+**Generalizes**: this is the same rule as the `Children()` trap above, on a second
+axis. That one says the container dictates what its children may BE; this one says
+it dictates what they LOOK LIKE. Both collapse to: *the cost of the container is
+never the container.* Before adopting one, ask what its platform's design language
+will impose — and if your design system has an opinion the platform disagrees
+with, the platform will win every argument you did not have on purpose.
+
+Corollary worth its own line: "it's more native" is not automatically "it's
+better". Native is a means to feeling right. When a brief has its own identity,
+the native default can be the thing that erases it.
+
 ### ListItem
 
 #### Rows with no `leading` slot can render broken, even in a fully-native tree

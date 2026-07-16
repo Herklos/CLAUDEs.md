@@ -143,6 +143,48 @@ size is enforced, but it must be a **real capture of the actual purchase
 screen** (simulator or device), not a mockup, or the IAP gets rejected while
 the binary passes.
 
+### RevenueCat test-store prices can be created via API and never changed
+
+Setting a test-store product's price from an agent/API works exactly once. The
+second time:
+
+```
+409  {"type": "resource_already_exists",
+      "message": "The price already exists for this product."}
+```
+
+The surface is create-only. There is no update-price and no delete-price:
+
+- `create-product-prices` — the only price WRITE for a test_store product, and it
+  409s the moment prices exist.
+- `set-product-store-state` — takes `store: app_store | play_store` only, so it
+  does not apply to a test-store product at all.
+- `equalize-subscription-prices` — App Store subscriptions only.
+
+Check the app's `type` before concluding anything; the same product id behaves
+differently per app type, and `create-product-prices` errors on a NON-test_store
+product for a completely different reason. `type: test_store` plus existing prices
+is a dead end: the dashboard is the only path.
+
+**Fix**: change it in the console. Do not route around it by archiving the product
+and recreating it at the new price — that orphans the offering and any purchase
+history to save a UI click.
+
+**What does NOT need changing** once the console price moves: a client reading
+`priceString` off the live product follows the store automatically, per storefront
+and currency. What DOES need changing is every price the SDK never touches, and
+they are easy to miss because nothing fails:
+
+- structured data (`schema.org` `Offer.price` in the page head), which is the
+  number a search engine can print beside the result;
+- the paywall's fallback string, shown only in the window before the store
+  answers — which is exactly when a wrong number is most convincing.
+
+**Generalizes**: whenever a price lives in a store, assume it ALSO lives in two or
+three places the store cannot reach, and grep for the digits rather than trusting
+"it comes from the SDK". A stale price in marketing metadata is invisible to every
+test and visible to every customer.
+
 ### Console click paths
 
 Compact, because the surrounding UI moves but the sequence doesn't.

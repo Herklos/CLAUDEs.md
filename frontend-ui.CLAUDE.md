@@ -17,7 +17,11 @@ defensible rather than arbitrary.
 4. [Honest data](#honest-data)
 5. [Routes are containers](#routes-are-containers)
 6. [Legible indicators](#legible-indicators)
-7. [Adapt with props, not parallel screens](#adapt-with-props-not-parallel-screens)
+7. [Rendering the same thing twice](#rendering-the-same-thing-twice)
+   - [The same gradient stops draw a quarter-turn apart in Skia and in CSS](#the-same-gradient-stops-draw-a-quarter-turn-apart-in-skia-and-in-css)
+8. [Verifying themes](#verifying-themes)
+   - [Forcing `prefers-color-scheme` over CDP manufactures a contrast bug that isn't there](#forcing-prefers-color-scheme-over-cdp-manufactures-a-contrast-bug-that-isnt-there)
+9. [Adapt with props, not parallel screens](#adapt-with-props-not-parallel-screens)
 
 ---
 
@@ -115,6 +119,47 @@ column. Pick the slot adjacent to the indicator; the redundancy is noise that
 crowds out the datum.
 
 ---
+
+## Rendering the same thing twice
+
+### The same gradient stops draw a quarter-turn apart in Skia and in CSS
+
+A signature shape implemented once for native (Skia) and once for web (CSS) can
+share its maths, its colours, and its stops exactly — and still be visibly
+different, with no error and nothing to grep.
+
+Sweep/conic gradients disagree on where zero is:
+
+- Skia `SweepGradient` with `start={0}` begins at **3 o'clock** (the positive
+  x-axis).
+- CSS `conic-gradient` with no `from` begins at **12 o'clock**.
+
+Identical stops therefore land 90° apart. The colour that should sit left sits at
+the bottom, so the object appears lit from a different direction on each platform.
+Both look plausible alone; only side by side is it obvious, and the two rarely
+appear side by side.
+
+**Fix**: `conic-gradient(from 90deg, ...)` to move CSS's origin to Skia's.
+
+Two adjacent notes from the same component, both cheap and both easy to get wrong:
+
+- **A closed stop list has no seam.** `[a, b, a]` wraps cleanly at any origin
+  because the wrap point is `a` meeting `a`. If the first and last stop differ, a
+  hard radial seam cuts the shape at whatever angle zero happens to be — which is
+  a different angle per renderer, per the above.
+- **A fixed-pixel detail makes a primitive non-scale-invariant.** A 4px curve is
+  2.2% of a 180px shape and 1.5% of a 260px one, so the shape flattens as it
+  grows and the largest instance carries the weakest version of the detail — worst
+  exactly where it is most looked at. Express such details as a FRACTION of the
+  size, pinned by a test that normalises the path by size and asserts the ratios
+  agree across sizes.
+
+**Generalizes**: sharing the maths between two renderers does not make them agree.
+Every renderer has its own conventions for origin, winding direction, and units,
+and they are silent — nothing throws, both outputs are individually reasonable.
+When one artefact has two implementations, pin the AGREEMENT in a test on the
+shared layer (normalised ratios, closed stop lists), because the drift is a design
+regression that no type checker or unit test of either side will catch.
 
 ## Verifying themes
 
