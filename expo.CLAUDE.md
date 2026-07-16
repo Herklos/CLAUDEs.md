@@ -10,6 +10,8 @@ is easy to jump to.
 1. [expo-router](#expo-router)
 2. [@expo/ui](#expoui)
    - [Universal BottomSheet](#universal-bottomsheet)
+   - [Universal List](#universal-list)
+   - [ListItem](#listitem)
    - [Host sizing](#host-sizing)
    - [Button](#button)
    - [SegmentedControl](#segmentedcontrol)
@@ -287,6 +289,85 @@ above) plus this reimplementation is safe; RN content plus this
 reimplementation reproduces the `Children()`-skip bug regardless of the
 sheet shell.
 
+### Universal List
+
+#### The same native-children trap as `BottomSheet` — with a worse failure mode
+
+The universal `List` (SwiftUI `List` on iOS, Compose `LazyColumn` +
+`PullToRefreshBox` on Android, a plain scrollable `View` on web) exposes an
+`onRefresh: () => Promise<void>` prop that looks like the obvious way to add
+pull-to-refresh to an existing screen. It is **not** a safe drop-in
+replacement for a `ScrollView` wrapping ordinary RN components — it hits the
+same `Children()` rule documented above for `BottomSheet`.
+
+Confirmed by reading the source, not inferred: Android's implementation
+(`node_modules/@expo/ui/android/src/main/java/expo/modules/ui/LazyColumnView.kt:84`)
+builds each `LazyColumn` `item {}` from the identical
+`getChildAt(index) as? ExpoComposeView<*> ?: continue` skip.
+
+The failure is *worse* here than in a `Column`. A `Column` is an
+overlapping-layer container, so a skipped RN child still paints (it's merely
+untappable). `LazyColumn` is **virtualized** — a skipped child is never
+composed at all, so it is silently **dropped from the list entirely**.
+Meanwhile iOS's `ListView.swift` hosts children through the same shared
+`RNHostView`-bridging `Children()` helper `BottomSheet` uses, so plain RN
+children render there normally.
+
+**Net effect**: the screen looks correct on iOS and silently loses its
+content on Android — the worst possible split, because iOS-first development
+never surfaces it.
+
+**Fix**: don't reach for `List` to bolt a container behavior (pull-to-refresh
+or anything else) onto a screen built from ordinary RN components. Use RN's
+own `<RefreshControl>` wired to a `ScrollView`'s `refreshControl` prop: no
+native-tree constraints, native look and feel on both platforms, no rewrite
+of existing screen content.
+
+Rewriting a screen's rows as native `ListItem`s just to satisfy Android would
+also mean abandoning your design system for that screen — a bad trade for a
+refresh gesture.
+
+**Generalizes**: before adopting an `@expo/ui` *container* for one
+convenient prop, check what its Android implementation does with non-
+`ExpoComposeView` children. If it's the `?: continue` pattern, the container
+only accepts a fully-native subtree, and the prop isn't worth the rewrite.
+The cost of the container is never the container — it's everything it forces
+its children to become.
+
+### ListItem
+
+#### Rows with no `leading` slot can render broken, even in a fully-native tree
+
+Distinct from the `Children()` rule above — this reproduces with **no** plain
+RN ancestor anywhere in the tree, so the usual explanation doesn't apply.
+
+Symptoms, all on iOS, all on rows that omit `leading`:
+
+- The enclosing `Column`'s card `borderRadius`/`borderWidth`/`borderColor`/
+  `backgroundColor` simply don't render.
+- A `Column` divider between two such rows doesn't render either.
+- Adjacent rows' label text shows a stray overlapping glyph at the leading
+  edge.
+
+**Fix**: give **every** row a `leading` element, even rows that are purely
+informational or icon-less by design (an empty-state notice gets an
+`information-circle-outline`; a settings row gets `options-outline`).
+Reference sheets that always pass a `leading` icon into every row never
+exhibit this; the ones that omit it do.
+
+**Ruled out first**: recalibrating the sheet's static `snapPoints` height.
+Raising it made the sheet taller with more dead space and changed nothing
+else — which is the useful part, since it proves the bug is not the detent
+being too tight to fit content. Don't re-buy that experiment.
+
+**Verification note worth internalizing**: a sheet legitimately sits over
+whatever screen is behind it, and that background screen's elements
+*correctly* still appear in the accessibility tree at their original
+coordinates. That alone is **not** evidence of a z-index or overlap bug —
+`describe`-style accessibility output will happily look like two things
+overlap when they don't. Confirm a visual glitch with an actual screenshot
+before theorizing about layering.
+
 ### Host sizing
 
 Every `@expo/ui` universal leaf (`Button`, `TextInput`, `Switch`,
@@ -553,3 +634,33 @@ initialization step (e.g. installing a polyfill that depends on the WASM
 module) never ran at all, which surfaces as a much more confusing failure
 much later (some unrelated built-in — `crypto`, `Buffer`, etc. — is
 simply missing, with no indication why).
+
+### A dependency that patches globals at *module load* must not sit on the boot graph
+
+Some native-crypto packages (`react-native-quick-crypto` is the common one)
+call their own `install()` at module top level, which patches
+`globalThis.crypto` and `Buffer`. If your app already installs its own
+crypto polyfills (a Rust/JSI bridge, a WASM module, a JS shim), you now have
+two things racing to own the same globals, and which one wins depends on
+module evaluation order — i.e. on import graph details nobody is tracking.
+
+**Fix**: `import()` such a package **lazily, at the point of use** (behind
+the first user action that actually needs it), never as a static top-level
+import from anything reachable at boot. Keep it off the boot graph entirely
+and the race can't happen.
+
+The reverse direction matters too: after adding a globals-patching package,
+re-verify the features that depend on *your* polyfills (crypto-backed
+unlock, signing, hashing) still work with it present, on a real device
+build. Both polyfill sets can be individually correct and still break each
+other.
+
+Related, same package class: a dep that requires **WebAssembly** (e.g.
+`hash-wasm`) cannot run on Hermes, which has no WASM. If a library pulls one
+in transitively, alias it to a pure-JS equivalent for native only in
+`metro.config.js`'s resolver, leaving web on the real (fast) WASM build.
+
+**Generalizes**: treat "patches globals at import time" and "needs WASM" as
+**properties of the import graph**, not of the call site. Both are invisible
+in the code that consumes the library, and both are fixed in the resolver or
+by moving the import — not by anything you can write at the point of use.
