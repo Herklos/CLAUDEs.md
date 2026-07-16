@@ -24,6 +24,8 @@ is easy to jump to.
    - [Android registration](#android-registration)
 5. [EAS Build](#eas-build)
 6. [Metro bundler](#metro-bundler)
+7. [Expo CLI & dev-client builds](#expo-cli--dev-client-builds)
+8. [expo-audio](#expo-audio)
 
 ---
 
@@ -1019,3 +1021,129 @@ in transitively, alias it to a pure-JS equivalent for native only in
 **properties of the import graph**, not of the call site. Both are invisible
 in the code that consumes the library, and both are fixed in the resolver or
 by moving the import — not by anything you can write at the point of use.
+
+### A redbox about a module you don't even depend on means you loaded another app's bundle
+
+Two RN repos on one machine, both with plain debug builds: every debug
+build bakes `localhost:8081` as its Metro origin. Whichever project's
+Metro owns 8081 serves *its* bundle to *any* debug app that connects. The
+symptom is disorienting: the app redboxes about native modules that are
+not in your `package.json` at all (`react-native-quick-crypto`, Skia
+components from the other product). Nothing is wrong with your code — you
+are executing someone else's JS.
+
+Ruled out first, expensively: reinstalling pods, wiping DerivedData,
+reinstalling the app. None of it can help, because the build is fine; the
+*port* is the identity.
+
+**Fix**: either give each project its own Metro port (and rebuild, since
+the port is baked in at build time), or install `expo-dev-client`, which
+adds a launcher UI that can point at any Metro URL at runtime without
+rebuilding.
+
+**Generalizes**: when an error names code you don't own and can't find in
+your lockfile, stop debugging your app and ask *whose bundle you are
+actually running*. On a shared machine, `lsof -nP -iTCP:8081` before
+anything else.
+
+---
+
+## Expo CLI & dev-client builds
+
+### expo-dev-client link failure on prebuilt RN core: RCTPackagerConnection / ShadowNode::getDebugName not found
+
+On an SDK that ships React Native as a prebuilt XCFramework (SDK 57 era,
+`RCT_USE_PREBUILT_RNCORE=1` default), adding `expo-dev-client` breaks the
+iOS link step:
+
+```text
+ld: symbol(s) not found for architecture arm64
+  RCTPackagerConnection, RCTReconnectingWebSocket,
+  facebook::react::Sealable, ShadowNode::getDebugName
+```
+
+The prebuilt core is a *release-flavored* artifact: it omits the
+dev-support symbols that dev-client (and anything else touching the
+packager connection or debug shadow-tree APIs) links against.
+
+Negative result worth keeping: a full clean rebuild + DerivedData wipe
+does **not** fix it — this is not stale-artifact corruption, the symbols
+genuinely are not in the prebuilt binary.
+
+**Fix**: build RN from source for this app:
+
+```bash
+RCT_USE_PREBUILT_RNCORE=0 pod install
+RCT_USE_PREBUILT_RNCORE=0 npx expo run:ios --scheme <Scheme>
+```
+
+Both steps need the env var — pod install decides the dependency graph,
+the build decides what actually compiles.
+
+**Generalizes**: prebuilt vendor binaries are built with *one* flavor's
+feature set. Any missing-symbol error whose names smell like dev tooling
+(`*Packager*`, `*Inspector*`, `*Debug*`) on an otherwise-correct setup
+means the prebuilt artifact excluded that flavor — switch to a source
+build rather than hunting a config bug in your own project.
+
+### `npx expo run:ios` without `--scheme` dies silently in non-interactive shells
+
+With more than one Xcode scheme in the workspace, `expo run:ios` prompts
+for a scheme. In a non-TTY context (agents, CI, anything piped) it
+instead exits with `Input is required, but 'npx expo' is in
+non-interactive mode` — and if the command is piped through `| tail`, the
+pipeline's exit code masks the failure and it looks like a successful
+no-op build.
+
+**Fix**: always pass `--scheme <Scheme>` explicitly, and never pipe a
+build command's output through anything that eats its exit status (use
+`set -o pipefail` or redirect to a file instead).
+
+**Generalizes**: any Expo CLI command that *can* prompt will hard-fail in
+non-interactive mode; pass every answer as a flag. And in automation,
+`cmd | tail` converts failures into silent successes.
+
+### `npx expo install` run from the monorepo root scaffolds a phantom app
+
+In a pnpm monorepo, running `npx expo install <pkg>` from the *root*
+(instead of the app workspace) does not error — it treats the root as an
+Expo project: writes a root `app.json` with a wrong bundle id, adds
+`expo`/`react`/`react-native` to the root `package.json`, and can leave a
+stray root `ios/` scaffold. Everything keeps building, so the pollution
+is only noticed later in diffs.
+
+**Fix**: run `expo install` only from the app's own directory. Clean-up
+if it happened: revert root `package.json`, delete the root `app.json`
+and stray `ios/`, then re-run the workspace install to reconcile the
+lockfile.
+
+**Generalizes**: Expo CLI decides "what project am I in" from cwd alone
+and will happily *create* the missing pieces. In a monorepo, any
+project-mutating CLI belongs in the workspace directory, never the root.
+
+---
+
+## expo-audio
+
+### play() before the player reports isLoaded is silently dropped
+
+`useAudioPlayer()` + an effect that calls `player.play()` on mount plays
+nothing — no error, no state change — when the source hasn't finished
+loading yet. A ref-based "already started" guard then prevents any retry,
+so autoplay never happens at all.
+
+**Fix**: gate autoplay on the player's loaded state
+(`status.isLoaded`), and let the effect re-run when it flips:
+
+```ts
+useEffect(() => {
+  if (!isLoaded || startedRef.current) return;
+  startedRef.current = true;
+  player.play();
+}, [isLoaded]);
+```
+
+**Generalizes**: media APIs whose commands are no-ops (rather than
+errors) before readiness turn "fire on mount" into a race you lose on
+cold cache. Any autoplay path must subscribe to the readiness signal, not
+assume it.

@@ -25,7 +25,7 @@ reachable from a session on any codebase, as a Claude Code plugin:
 - `skills/herklaude-skills/SKILL.md` — the skill itself.
 - `.claude-plugin/plugin.json` + `.claude-plugin/marketplace.json` — the repo
   is its own single-plugin marketplace (`/plugin marketplace add
-  Herklos/CLAUDEs.MD`).
+  Herklos/CLAUDEs.md`).
 - `install.sh` / `uninstall.sh` — the alternative route, symlinking
   `skills/herklaude-skills` into `~/.claude/skills/` so local edits apply
   with no `/plugin update`.

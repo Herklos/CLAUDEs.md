@@ -46,7 +46,7 @@ session and the half no documentation ever carries.
 The repo doubles as a Claude Code plugin marketplace. In any session:
 
 ```
-/plugin marketplace add Herklos/CLAUDEs.MD
+/plugin marketplace add Herklos/CLAUDEs.md
 /plugin install herklaude-skills@herklos
 ```
 
@@ -64,8 +64,8 @@ If the knowledge base is yours and you edit it, install from a clone so that
 your edits apply immediately rather than at the next `/plugin update`:
 
 ```bash
-git clone https://github.com/Herklos/CLAUDEs.MD.git
-cd CLAUDEs.MD
+git clone https://github.com/Herklos/CLAUDEs.md.git
+cd CLAUDEs.md
 ./install.sh     # ./uninstall.sh to remove
 ```
 
