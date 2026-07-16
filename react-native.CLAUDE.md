@@ -11,6 +11,7 @@ TurboModule registration, EAS, Metro) see `expo.CLAUDE.md`.
    - [Recycle anything that can grow](#recycle-anything-that-can-grow)
    - [Spacing recycled cells](#spacing-recycled-cells)
    - [Sectioned data](#sectioned-data)
+   - [A row reading state outside its own item silently renders stale](#a-row-reading-state-outside-its-own-item-silently-renders-stale)
 2. [Scrolling](#scrolling)
 3. [Dependencies that patch globals](#dependencies-that-patch-globals)
 4. [JS/TS syntax traps](#jsts-syntax-traps)
@@ -57,6 +58,38 @@ For grouped/sectioned lists (transactions by date, say), flatten to a single
 recycles into its own pool. Don't nest a `.map()` of sub-lists inside
 `renderItem` — that reintroduces the un-recycled rendering you flattened to
 avoid, one level deeper where it's harder to see.
+
+### A row reading state outside its own item silently renders stale
+
+A recycling list (FlashList, `@legendapp/list`) memoizes rows by **item
+identity**: `renderItem` re-runs for a row only when that row's item
+reference changes. So a row whose visual state is derived from something
+*other* than its item — typically a lookup into a second store keyed by the
+item's id, `selected.find(s => s.rowId === item.id)` — keeps rendering the
+old value when that external state changes, because the item reference
+didn't.
+
+What makes it expensive to diagnose is the delay: the row *does* catch up
+later, as soon as anything unrelated hands the list a fresh set of item
+references (a foreground re-hydrate, a refetch). So the bug presents as a
+**~30-second hang that eventually resolves**, which reads like a slow
+network round-trip, not a memoization bug. Nothing is slow; nothing is
+pending.
+
+**Fix**: pass `extraData={theExternalState}` (or a `Set`/`Map` derived from
+it) so a change there forces `renderItem` to re-run for all rows.
+
+**Negative result worth keeping**: this is *not* needed when the row
+component reads its own store selector directly inside itself. That row
+re-renders via its own hook subscription regardless of list memoization —
+the list's memoization only gates whether `renderItem` is *called*, not
+whether an already-mounted row component can re-render itself. Adding
+`extraData` there is a pure cost.
+
+`Generalizes:` any memoization keyed on one input silently lies about every
+other input the render actually depends on. When a memoized render reads
+ambient state, the memo key has to include it — and the symptom will be
+staleness with a delay, not staleness with a stack trace.
 
 ---
 

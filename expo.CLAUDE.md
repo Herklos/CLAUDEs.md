@@ -10,17 +10,20 @@ is easy to jump to.
 1. [expo-router](#expo-router)
 2. [@expo/ui](#expoui)
    - [Universal BottomSheet](#universal-bottomsheet)
+   - [Community BottomSheet](#community-bottomsheet)
    - [Universal List](#universal-list)
    - [ListItem](#listitem)
    - [Host sizing](#host-sizing)
    - [Button](#button)
    - [SegmentedControl](#segmentedcontrol)
+   - [DateTimePicker](#datetimepicker)
    - [swift-ui/modifiers vs jetpack-compose/modifiers](#swift-uimodifiers-vs-jetpack-composemodifiers)
-3. [Native modules / TurboModules](#native-modules--turbomodules)
+3. [Widgets (expo-widgets)](#widgets-expo-widgets)
+4. [Native modules / TurboModules](#native-modules--turbomodules)
    - [iOS registration](#ios-registration)
    - [Android registration](#android-registration)
-4. [EAS Build](#eas-build)
-5. [Metro bundler](#metro-bundler)
+5. [EAS Build](#eas-build)
+6. [Metro bundler](#metro-bundler)
 
 ---
 
@@ -289,6 +292,68 @@ above) plus this reimplementation is safe; RN content plus this
 reimplementation reproduces the `Children()`-skip bug regardless of the
 sheet shell.
 
+### Community BottomSheet
+
+Not the same component as the universal one above: `@expo/ui/community/bottom-sheet`
+is the `@gorhom/bottom-sheet` drop-in, with `enableDynamicSizing`,
+`backgroundStyle`, and a much simpler prop surface. Its gotchas — and
+crucially its *fixes* — are different, and reading a universal-BottomSheet
+finding as if it applied here is the expensive mistake.
+
+#### `enableDynamicSizing={false}` alone makes plain RN content tappable on iOS
+
+Same visible symptom as the universal sheet on iOS: RN `Pressable` rows
+inside show a press animation but `onPress` never fires. Same underlying
+`RNHostView` bridge whose touch handler attaches once, on first appear, with
+no retry. The mechanism, traced through
+`node_modules/@expo/ui/src/community/bottom-sheet/BottomSheet.ios.tsx`: with
+no explicit `snapPoints`, `enableDynamicSizing` **defaults to `true`** →
+`fitToContents` → SwiftUI re-measures and resizes the sheet *after* it is
+presented → the hosted view is re-parented → the touch handler desyncs
+permanently for that mount. It can also stick at the `.medium` fallback
+detent.
+
+**Fix**: on iOS only, pass `enableDynamicSizing={false}`. With no
+`snapPoints`, detents fall back to native `['medium','large']` — no
+post-present resize, so the bridge never desyncs. Android (Material3) and web
+(vaul) were never affected.
+
+Do **not** pass `snapPoints={['medium','large']}` explicitly to express the
+same thing: `parseSnapPoint` does not accept those strings, it `parseFloat`s
+them to `NaN`.
+
+**The expensive negative result**: this fix is *sufficient on its own*.
+Plain RN content — `Pressable`, `TextInput`, `ScrollView` — works reliably
+inside the community sheet on iOS once dynamic sizing is off. Rebuilding
+sheet content out of `@expo/ui`-native components as a defensive move (the
+correct answer for the *universal* sheet) failed three separate ways on
+device here — collapsed layout, blank/greedy list, dead buttons — before
+being reverted to plain RN. The touch-desync it was defending against had
+already been fixed centrally. Give an explicit `snapPoints` (e.g.
+`["55%","85%"]`) rather than relying on `fitToContents`, and cap any
+scrollable region with `maxHeight`.
+
+`Generalizes:` two components with the same symptom, the same bridge and
+different sizing models do not have the same fix. Check which package path
+the import came from before applying a remembered remedy.
+
+#### Content shorter than the detent shows the screen through the sheet
+
+A sheet whose native chrome color doesn't match its content shows a
+mismatched band around the rounded content card; where a static detent is
+taller than the content, the extra gap shows the screen behind through the
+**translucent default material** — reading as "washed out" rather than as a
+color bug. An all-native content tree with no RN `View` backing has no
+content color at all, so the *entire* sheet ghosts.
+
+**Fix**: default `backgroundStyle` to the app's own surface color inside a
+shared sheet wrapper, so every sheet's chrome matches content by
+construction and callers only override. Then keep inner cards on that same
+surface color — an inner card painted a different shade (stark white against
+a warm surface, say) reintroduces the band the wrapper just removed. And
+size a fixed detent percentage to actually fit: too generous reopens the
+gap, too tight clips.
+
 ### Universal List
 
 #### The same native-children trap as `BottomSheet` — with a worse failure mode
@@ -386,6 +451,35 @@ Pass an explicit `matchContents` hint (or an explicit width/height style)
 on the first use of any `@expo/ui` universal leaf, don't assume it "just
 fills its parent" the way an RN `View` with `flex: 1` would.
 
+#### The hint has to be chosen per leaf, so it can't live in a shared wrapper
+
+The tempting fix once several primitives wrap `Host` is to set
+`matchContents` once, in the shared wrapper. It can't work: **different
+leaves need opposite hints**, and the sizing of a `Host` is fixed at mount,
+so a hint is ignored entirely when a leaf collapses into an ancestor's
+existing `Host`.
+
+What each leaf actually needs, all device-confirmed:
+
+- **`TextInput`** — `matchContents={{ vertical: true }}`: hug height to
+  content, still fill the row's width.
+- **`Switch`/`Checkbox`** (both wrap SwiftUI `Toggle`) — `matchContents={true}`
+  **plus** `style={{ alignSelf: 'center' }}`. They're typically the trailing
+  child after a `flex-1` label, so the un-hinted Host stretches and the
+  native control overflows; and a `matchContents` Host does *not* reliably
+  inherit the parent row's cross-axis centering, so without the explicit
+  `alignSelf` the control sits visibly off-center against its label.
+- **`Button`** — see below; stretch and hug are different call sites.
+
+**Fix**: give the shared wrapper an optional pass-through
+(`useHostWrap(node, hostProps?)`) and set the hint at each primitive, not
+once centrally.
+
+`Generalizes:` a wrapper can centralize a *policy* but not a *measurement
+contract*. When each consumer's correct value differs, hoisting the setting
+into the wrapper just picks a default that's wrong for most of them —
+silently, since every failure here is a layout artifact rather than an error.
+
 ### Button
 
 **Native `Button`'s `variant` fights a custom `backgroundColor`.**
@@ -396,6 +490,52 @@ around your custom pill. Use `variant="text"` (`.plain` — no native
 chrome) instead, and force the label color explicitly, since `.plain` has
 no automatic contrast handling of its own.
 
+A long label on a narrowed custom button (a half-width Confirm/Cancel pair)
+then overflows rather than shrinking: add `modifiers={[minimumScaleFactor(0.75)]}`
+so SwiftUI shrinks to fit instead of clipping.
+
+#### `width: '100%'` is a silent no-op; "fill" needs a modifier
+
+Two separate traps for the same intent:
+
+- `UniversalStyle.width` **casts straight to `number`** (see
+  `transformStyle.ios.ts`), so a percentage string is silently dropped. It
+  doesn't warn, it just doesn't apply.
+- A size-less `Host` does **not** reliably fill its RN parent in practice,
+  whatever the docs imply.
+
+**Fix**: the mechanism that works is the SwiftUI `frame({ maxWidth: Infinity })`
+modifier on the `Button`, plus `matchContents: { vertical: true }` on its
+Host — the same "fill available width" pattern `@expo/ui`'s own
+ScrollView/BottomSheet use internally. Use it for stacked or `flex-1`-half
+buttons; omit it (hug, `matchContents: true`) for nav-bar/inline buttons,
+which is the canonical `<Host matchContents><Button/></Host>` from the docs.
+
+#### `foregroundStyle` colors the label on iOS and leaves Android invisible
+
+`foregroundStyle` — like everything in `@expo/ui/swift-ui/modifiers` — is a
+**SwiftUI modifier with no Jetpack Compose equivalent**. On Android it is a
+silent no-op (a platform-split modifier shim resolves the real modifier on
+both, but Compose ignores this one), and the universal `Button` never
+forwards a content color to Compose either. Net effect: a colored-fill
+button whose label is correct on iOS and stays at Material's **dark default
+content color on Android** — invisible against a saturated fill. Nothing
+errors; iOS review passes.
+
+**Fix**: don't pass the raw modifier from call sites. Expose a `labelColor`
+prop on your shared Button that branches — iOS applies
+`foregroundStyle(labelColor)`; Android renders the label as a colored
+`@expo/ui` `Text` **child** (`textStyle={{ color }}` → native Compose
+`Text.color`), since the universal Button uses `children` as its content;
+web is unaffected (the modifier is a no-op stub there anyway).
+
+`Generalizes:` **the same missing-content-color-passthrough bug appears
+wherever `@expo/ui` forwards one color and not the other** — see
+SegmentedControl below, where a `tintColor` paints the active segment but the
+label stays Material-dark. Whenever a native prop takes an accent color, ask
+what colors the *content* on the other platform, and verify on Android
+specifically: iOS's automatic contrast handling hides the bug there.
+
 ### SegmentedControl
 
 `@expo/ui/community/segmented-control` only forwards a single `tintColor`
@@ -404,6 +544,33 @@ accent — it doesn't also forward a content/label color. iOS's
 tint automatically; Android's Material `SegmentedButton` does **not**, so
 a custom `tintColor` risks a dark-on-dark unreadable active label on
 Android specifically, even though iOS looks fine with the exact same prop.
+
+There is no prop to fix this with. **Fix**: keep the native control on iOS
+(its active label is already legible against any tint) and render a plain-RN
+pill toggle on Android — a platform-split file, not a runtime branch, since
+the two implementations share no props.
+
+### DateTimePicker
+
+`@expo/ui/community/datetime-picker` is self-hosting — no `Host`/wrapper
+needed, like `community/bottom-sheet` and `community/segmented-control`.
+
+#### `display` defaults to a compact chip, not the picker you expected
+
+Left unset, the picker renders as a small tappable date/time **chip** rather
+than the always-visible control most designs assume. Set it explicitly:
+`display="inline"` for `mode="date"`, `display="spinner"` for `mode="time"`
+(the classic always-visible wheel).
+
+**`mode="time"` must not auto-commit.** Its continuous scroll fires
+`onValueChange` on **every tick**, so a handler that writes straight to the
+store on change (fine in date mode) commits dozens of intermediate values as
+the wheel spins. Buffer in local state, commit on an explicit Confirm.
+
+`Generalizes:` on iOS a native date/time picker doesn't need a sheet at all —
+expanding it inline under the row it edits is fewer moving parts than a
+modal, and sidesteps every sheet gotcha above. Keep the sheet path for the
+platforms that need it.
 
 ### `swift-ui/modifiers` vs `jetpack-compose/modifiers`
 
@@ -431,6 +598,55 @@ specifically in `@expo/ui/jetpack-compose`'s *component* subpath (actual
 native views like `Column`/`Host`/`ModalBottomSheet`), not its modifiers
 subpath — see the `.android.tsx` note above for why that distinction
 matters.
+
+---
+
+## Widgets (expo-widgets)
+
+An iOS home-screen widget written in JS/TSX looks like an ordinary component
+and is not one. Four rules, none of which the shape of the code hints at.
+
+### The `'widget'` directive stringifies your function, so nothing outside it exists
+
+`babel-preset-expo`'s widgets plugin replaces the `createWidget('Name', fn)`
+component with **a string of `fn`'s own source**, stored in the App Group and
+evaluated natively inside the widget extension. The widget function therefore
+runs in a scope that contains only the injected `@expo/ui/swift-ui`
+components/modifiers and JS globals.
+
+Everything else is `undefined` at native eval time — **imported theme
+constants, outer-scope consts, shared helper functions, design tokens**. It
+compiles, it type-checks, and it fails on device.
+
+**Fix**: keep the widget function fully self-contained. Every color and size
+is an inline literal; no imports are referenced from inside it.
+
+`Generalizes:` any "directive" that a compiler uses to relocate code to
+another runtime (`'use server'`, `'widget'`, worklets) silently voids the
+lexical scope you can see. Closures over module scope are the first thing to
+break and the last thing you suspect, because the editor shows a valid
+reference.
+
+### Never import the widget from cross-platform code
+
+It imports `@expo/ui/swift-ui`, which crashes the web bundle at load (see the
+`ExpoUI` entry above). Reach it only through a platform-split bridge:
+`widget.ts` a **no-op stub** for web/Android, `widget.ios.ts` importing the
+widget and its data builder. App code imports the bridge, never the widget.
+That indirection is what keeps `grep -c ExpoUI dist/.../entry-*.js` at `0`.
+
+### Data must be pre-localized in JS
+
+The native widget can't call the i18n runtime. A data-builder function on the
+JS side must return **ready-to-render strings** (with icons as SF Symbol
+names) rather than keys — which means it duplicates the screen's own
+thresholds and selectors, and has to be kept in lockstep with them.
+
+### Refresh is push-based
+
+Nothing pulls. Update the snapshot from a debounced subscription to the
+stores the widget mirrors, plus on app foreground. If the widget goes stale,
+look for the missing subscription, not for a refresh interval.
 
 ---
 
@@ -582,6 +798,25 @@ fail (or silently produce a broken binary) in CI/cloud builds.
 ---
 
 ## Metro bundler
+
+### A *newly added* export subpath resolves to `dist/` while the old ones resolve to source
+
+A workspace package consumed from source by Metro typically declares an
+export map with `source`/`react-native`/`require` → `src/...` and `import` →
+`dist/...` (for non-RN consumers). The established subpaths (`.`,
+`./components`, `./theme`) resolve from `src` and everything works — so
+adding one more per-file subpath looks free. It isn't: the new subpath
+resolved to the **unbuilt `dist/` path** on web and broke `expo export
+--platform web` with `Unable to resolve module`, while native kept working.
+
+**Fix**: don't add per-file export subpaths for Metro consumers of a
+source-resolved workspace package. **Re-export through an existing barrel**
+instead.
+
+`Generalizes:` export-map condition resolution is not uniform across a
+package's subpaths in practice — a pattern that holds for the entries you
+inherited is not evidence it holds for the entry you add. And the platform
+that breaks is the one whose conditions you weren't thinking about.
 
 ### Forcing a specific resolution for a package with problematic dynamic imports
 
