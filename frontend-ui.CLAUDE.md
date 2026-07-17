@@ -15,6 +15,7 @@ defensible rather than arbitrary.
 2. [Reuse first](#reuse-first)
 3. [Hierarchy](#hierarchy)
 4. [Critiquing AI-generated UI with a design vocabulary](#critiquing-ai-generated-ui-with-a-design-vocabulary)
+   - [Beware of utilitarian AI design](#beware-of-utilitarian-ai-design)
 5. [Honest data](#honest-data)
 6. [Routes are containers](#routes-are-containers)
 7. [Legible indicators](#legible-indicators)
@@ -75,14 +76,15 @@ importance, and claims compete.
 
 ## Critiquing AI-generated UI with a design vocabulary
 
-An agent assembles layouts fine when patterns and templates already exist,
-but it has no eyes — it can't judge whether the *result* reads as
-harmonious. "Make it look nicer" or a static `visual-design.md` skill file
-doesn't fix this. What works: feed back a screenshot of the actual render and
-critique it against a fixed, named vocabulary, one axis at a time, then ask
-for a revision.
+**Don't ask for "make it look nicer" — critique a screenshot against a
+named checklist instead.** An agent assembling a layout has no eyes: it
+can't judge whether the *result* reads as harmonious, and a static
+`visual-design.md` skill file doesn't fix that either, because "looks
+harmonious" isn't checkable from source. Take a screenshot of the actual
+render, critique it against the eight axes below one at a time, and ask for
+a revision — naming the specific axis that's off, not a general impression.
 
-Eight axes cover what "good design" cashes out to in practice:
+The eight axes, as vocabulary to critique with:
 
 - **Contrast** — differences in size/color/weight/shape create hierarchy;
   without it everything competes equally and nothing stands out.
@@ -106,12 +108,30 @@ Eight axes cover what "good design" cashes out to in practice:
 
 **Generalizes**: an agent given a screenshot plus this checklist revises
 substantially better than one given a vague aesthetic prompt, because each
-axis is independently falsifiable against the image. AI-first UI defaults to
-utilitarian and feature-complete but visually sterile — flat contrast, no
-spare white space, no restraint on accent color — because those defaults
-satisfy every functional requirement without satisfying any of these eight.
-Naming the axis you're unhappy with (not just "polish this") is what turns
-the critique into something an agent can act on.
+axis is independently falsifiable against the image. Naming the axis you're
+unhappy with (not just "polish this") is what turns the critique into
+something an agent can act on.
+
+### Beware of utilitarian AI design
+
+**Never treat your own first pass as the deliverable.** A first pass is a
+feature-complete skeleton, not a finished screen — every requirement met,
+every control present, every state rendered, nothing *wrong* — which is
+exactly why it's tempting to stop there. It is optimized for "satisfies the
+spec," not "creates a feeling," and it will read as flat and forgettable
+even though nothing on it is broken. Run it through the eight-axis critique
+above, then go back and add the nuance the spec never asked for.
+
+Concretely: don't reset context between steps of a flow. A checkout that
+shows only the current step, with no recap of price/dates/selection already
+chosen, is functionally correct and still uninviting — carry that context
+forward at each step instead.
+
+**Generalizes**: an unrevised AI-first draft is recognizable as one
+immediately, and at scale it makes an app indistinguishable from every other
+AI-assisted app shipped this cycle. Budget an explicit second pass for
+nuance — don't fold it into the first pass's spec, and don't skip it because
+the first pass technically works.
 
 Source: [Expo — How to apply professional design principles in AI app
 development](https://expo.dev/blog/how-to-apply-professional-design-principles-in-ai-app-development)

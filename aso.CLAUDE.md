@@ -22,12 +22,14 @@ benchmark numbers are marked practitioner-measured and are directional only.
    - [Accented and unaccented are one token on Play and two on Apple](#accented-and-unaccented-are-one-token-on-play-and-two-on-apple)
 4. [Behavioral gates](#behavioral-gates)
    - [Android Vitals demotes you regardless of metadata](#android-vitals-demotes-you-regardless-of-metadata)
+   - [Ratings and reviews are a ranking factor, not just a conversion signal](#ratings-and-reviews-are-a-ranking-factor-not-just-a-conversion-signal)
 5. [Creative & advanced surfaces](#creative--advanced-surfaces)
    - [One icon file cannot ship to both stores](#one-icon-file-cannot-ship-to-both-stores)
    - [Event metadata is indexed search real estate; the long description is not](#event-metadata-is-indexed-search-real-estate-the-long-description-is-not)
    - [Apple's alternate pages don't rank, Play's do](#apples-alternate-pages-dont-rank-plays-do)
 6. [Research method](#research-method)
    - [Competitor metadata cannot be byte-verified from a build environment](#competitor-metadata-cannot-be-byte-verified-from-a-build-environment)
+   - [An open-source Agent Skills package exists for this exact loop](#an-open-source-agent-skills-package-exists-for-this-exact-loop)
 
 ---
 
@@ -201,6 +203,26 @@ gates before rewriting copy. Also: an offline-first, no-account onboarding is
 a *retention asset* under this model — protect it rather than trading it for
 a signup funnel.
 
+### Ratings and reviews are a ranking factor, not just a conversion signal
+
+**Don't scope review-prompt UX as a pure conversion concern** — treating star
+rating and review velocity as only a trust signal for users undersells them:
+both stores also weight them directly in ranking, in the same gate category
+as the Vitals thresholds above. A stalled review velocity can suppress rank
+the same way a crash-rate breach does, independent of metadata quality.
+
+**Fix**: never trigger the native review prompt (`SKStoreReviewController` /
+Play's in-app review API) on first launch or immediately after install —
+both platforms throttle how often the prompt can fire at all, so an early
+prompt to a user who hasn't formed an opinion yet burns one of a limited
+number of yearly attempts for nothing. Fire it right after a user completes
+a meaningful success (a save, a completed flow), when they're likeliest to
+rate positively.
+
+`Generalizes:` a "ranking factors" mental model that stops at metadata and
+crash/ANR gates is incomplete. Check review velocity before concluding a
+rank drop is purely a metadata problem, same as Vitals.
+
 ---
 
 ## Creative & advanced surfaces
@@ -287,3 +309,17 @@ instinct to iterate. Apple metadata settles in ~3–4 weeks (change ~every 4
 weeks), Play ~6–8. Snapshot ranks, change **one variable**, read at 7–14
 days for first signal and 4–8 weeks for confidence. Promotional Text is the
 exception — free to change anytime.
+
+### An open-source Agent Skills package exists for this exact loop
+
+Check [ASO Skills](https://github.com/Eronred/aso-skills) before hand-rolling
+this file's research loop from scratch in an agent session — it packages a
+chained `aso-audit → keyword-research → metadata-optimization` workflow as
+Claude Code/Cursor/Codex Agent Skills, each aware of the others' output, so
+an audit's findings feed keyword research and keyword research feeds
+metadata generation without manual hand-off.
+
+`Generalizes:` it's a third-party package, not vetted here for accuracy or
+maintenance — and whatever "live" App Store data it returns is still subject
+to the byte-verification constraint above. Cross-check its output the same
+way you'd cross-check a vendor blog number before acting on it.
