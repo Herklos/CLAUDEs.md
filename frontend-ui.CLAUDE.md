@@ -14,14 +14,16 @@ defensible rather than arbitrary.
 1. [Tokens only](#tokens-only)
 2. [Reuse first](#reuse-first)
 3. [Hierarchy](#hierarchy)
-4. [Honest data](#honest-data)
-5. [Routes are containers](#routes-are-containers)
-6. [Legible indicators](#legible-indicators)
-7. [Rendering the same thing twice](#rendering-the-same-thing-twice)
+4. [Critiquing AI-generated UI with a design vocabulary](#critiquing-ai-generated-ui-with-a-design-vocabulary)
+5. [Honest data](#honest-data)
+6. [Routes are containers](#routes-are-containers)
+7. [Legible indicators](#legible-indicators)
+8. [Rendering the same thing twice](#rendering-the-same-thing-twice)
    - [The same gradient stops draw a quarter-turn apart in Skia and in CSS](#the-same-gradient-stops-draw-a-quarter-turn-apart-in-skia-and-in-css)
-8. [Verifying themes](#verifying-themes)
+9. [Verifying themes](#verifying-themes)
    - [Forcing `prefers-color-scheme` over CDP manufactures a contrast bug that isn't there](#forcing-prefers-color-scheme-over-cdp-manufactures-a-contrast-bug-that-isnt-there)
-9. [Adapt with props, not parallel screens](#adapt-with-props-not-parallel-screens)
+10. [Adapt with props, not parallel screens](#adapt-with-props-not-parallel-screens)
+11. [Typography primitives](#typography-primitives)
 
 ---
 
@@ -68,6 +70,51 @@ decorate.**
 
 Two heroes on a screen means neither is a hero. The variant is a claim about
 importance, and claims compete.
+
+---
+
+## Critiquing AI-generated UI with a design vocabulary
+
+An agent assembles layouts fine when patterns and templates already exist,
+but it has no eyes — it can't judge whether the *result* reads as
+harmonious. "Make it look nicer" or a static `visual-design.md` skill file
+doesn't fix this. What works: feed back a screenshot of the actual render and
+critique it against a fixed, named vocabulary, one axis at a time, then ask
+for a revision.
+
+Eight axes cover what "good design" cashes out to in practice:
+
+- **Contrast** — differences in size/color/weight/shape create hierarchy;
+  without it everything competes equally and nothing stands out.
+- **Hierarchy** — size, position, color, and weight signal "look here
+  first," in the order that matters (distinct from the [Hierarchy](#hierarchy)
+  house rule above, which is one specific application of this).
+- **Alignment** — shared edges/axes read as related and intentional; its
+  absence looks sloppy immediately.
+- **Proximity** — white space between groups signals what belongs together,
+  no borders or boxes needed.
+- **Repetition** — reused colors/fonts/shapes/spacing patterns read as one
+  system instead of several independent decisions.
+- **Balance** — visual weight distributed across the composition
+  (symmetric or asymmetric, either works); an unbalanced layout feels off
+  even when nothing is individually wrong.
+- **White space** — negative space is active, not empty; it's what
+  determines whether a design feels premium, calm, or cluttered.
+- **Unity** — the sense that every element belongs. It isn't a separate
+  technique — it's what emerges when the other seven are already agreeing
+  with each other.
+
+**Generalizes**: an agent given a screenshot plus this checklist revises
+substantially better than one given a vague aesthetic prompt, because each
+axis is independently falsifiable against the image. AI-first UI defaults to
+utilitarian and feature-complete but visually sterile — flat contrast, no
+spare white space, no restraint on accent color — because those defaults
+satisfy every functional requirement without satisfying any of these eight.
+Naming the axis you're unhappy with (not just "polish this") is what turns
+the critique into something an agent can act on.
+
+Source: [Expo — How to apply professional design principles in AI app
+development](https://expo.dev/blog/how-to-apply-professional-design-principles-in-ai-app-development)
 
 ---
 
@@ -193,3 +240,41 @@ Two-state variants of the same screen — "has node" vs "no node", "empty" vs
 Forked screens drift. Not immediately, which is what makes it insidious: they
 start identical, then one gets a spacing fix, then the other gets a new
 field, and six months later they're two designs that nobody decided on.
+
+---
+
+## Typography primitives
+
+### A digit renders as "U" — the glyph is vertically clipped by a stale lineHeight, not a broken font
+
+A stats counter showed "U" where "0" should be. Two wrong theories cost the
+session real time: (1) iOS substituting a fallback face when a loaded custom
+font is asked for a synthesized weight, (2) the font lacking `tnum` support
+for `fontVariant: ['tabular-nums']`. Both were ruled out when a second,
+differently-styled numeral broke the same way.
+
+The actual cause: the shared `Heading`/`H2` text primitives hardcoded
+`lineHeight` **derived from their default fontSize** (`fontSize * 1.05`).
+Callers overrode `fontSize` upward through the style prop; the default
+lineHeight stayed, and RN clips a text node to its lineHeight — the top arc
+of the "0" was cut off, leaving a "U". Letters mostly survive (ascenders
+clip subtly); round digits are where it becomes legible as the wrong glyph.
+
+**Fix**: in the primitive, scale the default lineHeight with the overridden
+fontSize instead of freezing it:
+
+```tsx
+function scaledLineHeight(style: TextStyle | undefined, ratio: number, fallback: number) {
+  return typeof style?.fontSize === 'number' ? style.fontSize * ratio : fallback;
+}
+// lineHeight: scaledLineHeight(style, 1.15, DEFAULT_SIZE * 1.05)
+```
+
+Callers passing an explicit lineHeight still win (style merges after).
+
+**Generalizes**: any text primitive that sets BOTH fontSize and lineHeight
+defaults invites this bug the moment a caller overrides only one of them.
+When a glyph looks "wrong" only at certain sizes, suspect clipping before
+suspecting the font: compare fontSize against the effective lineHeight
+first — it is a one-line check, and font-substitution theories are a
+rabbit hole.
