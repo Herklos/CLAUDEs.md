@@ -26,6 +26,7 @@ is easy to jump to.
 6. [Metro bundler](#metro-bundler)
 7. [Expo CLI & dev-client builds](#expo-cli--dev-client-builds)
 8. [expo-audio](#expo-audio)
+9. [Appearance / dark mode](#appearance--dark-mode)
 
 ---
 
@@ -1190,3 +1191,32 @@ useEffect(() => {
 errors) before readiness turn "fire on mount" into a race you lose on
 cold cache. Any autoplay path must subscribe to the readiness signal, not
 assume it.
+
+---
+
+## Appearance / dark mode
+
+### Native components flash white on theme switch (worst on iOS Liquid Glass)
+
+A JS-only theme (context/store flag) has no effect on native chrome — the OS
+still renders native components (Liquid Glass surfaces especially) against
+whatever `Appearance` last reported, so switching the app's theme flashes
+white before the JS tree repaints.
+
+**Fix**: keep the native color scheme in lockstep with the JS theme via
+`Appearance.setColorScheme`:
+
+```tsx
+// const colorScheme: "light" | "dark"
+useEffect(() => {
+  if (appTheme === "system") {
+    Appearance.setColorScheme("unspecified");
+  } else {
+    Appearance.setColorScheme(colorScheme);
+  }
+}, [appTheme, colorScheme]);
+```
+
+`Generalizes:` a JS theme value only drives components React renders. Native
+surfaces read the OS `Appearance` API directly, so any app-level theme needs
+to push into it explicitly, not just into React context.
